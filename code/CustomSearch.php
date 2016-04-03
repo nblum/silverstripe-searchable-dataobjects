@@ -6,8 +6,8 @@
  * @package cms
  * @subpackage search
  */
-class CustomSearch extends Extension {
-
+class CustomSearch extends Extension
+{
 	/**
 	 * @var int the number of items for each page, used for pagination
 	 */
@@ -18,16 +18,17 @@ class CustomSearch extends Extension {
 	 * @var string
 	 */
 	private static $search_controller = 'SearchPage';
-
-	private static $allowed_actions = array(
+	private static $allowed_actions   = array(
 			'SearchForm',
 			'results',
+			'LastRequests',
 	);
 
 	/**
 	 * Site search form
 	 */
-	public function SearchForm() {
+	public function SearchForm()
+	{
 		$form = new SearchForm($this->getControllerForSearchForm(), 'SearchForm', $this->getSearchFields(), $this->getSearchActions());
 		return $form;
 	}
@@ -37,7 +38,8 @@ class CustomSearch extends Extension {
 	 * @uses updateSearchFields
 	 * @return FieldList
 	 */
-	public function getSearchFields() {
+	public function getSearchFields()
+	{
 		$searchText = _t('SearchForm.SEARCH', 'Search');
 
 		if ($this->owner->request && $this->owner->request->getVar('Search')) {
@@ -45,7 +47,7 @@ class CustomSearch extends Extension {
 		}
 
 		$fields = new FieldList(
-			new TextField('Search', false, $searchText)
+				new TextField('Search', false, $searchText)
 		);
 
 		$this->owner->extend('updateSearchFields', $fields);
@@ -58,9 +60,10 @@ class CustomSearch extends Extension {
 	 * @uses updateSearchActions
 	 * @return FieldList
 	 */
-	public function getSearchActions() {
+	public function getSearchActions()
+	{
 		$actions = new FieldList(
-			new FormAction('results', _t('SearchForm.GO', 'Go'))
+				new FormAction('results', _t('SearchForm.GO', 'Go'))
 		);
 
 		$this->owner->extend('updateSearchActions', $actions);
@@ -72,7 +75,8 @@ class CustomSearch extends Extension {
 	 *
 	 * @return ContentController
 	 */
-	public function getControllerForSearchForm() {
+	public function getControllerForSearchForm()
+	{
 		$controllerName = Config::inst()->get('CustomSearch', 'search_controller');
 
 		if ($controllerName == 'this') {
@@ -103,7 +107,8 @@ class CustomSearch extends Extension {
 	 * @param SearchForm $form The form instance that was submitted
 	 * @param SS_HTTPRequest $request Request generated for this action
 	 */
-	public function getSearchResults($request) {
+	public function getSearchResults($request)
+	{
 
 		$list = new ArrayList();
 
@@ -111,13 +116,13 @@ class CustomSearch extends Extension {
 		$q = $v["Search"];
 
 		$input = DB::getConn()->addslashes($q);
-		$data = DB::query("SELECT * FROM SearchableDataObjects WHERE MATCH (Title, Content) AGAINST ('$input' IN NATURAL LANGUAGE MODE)");
+		$data  = DB::query("SELECT * FROM SearchableDataObjects WHERE MATCH (Title, Content) AGAINST ('$input' IN NATURAL LANGUAGE MODE)");
 
 		foreach ($data as $row) {
 
 			$do = DataObject::get_by_id($row['ClassName'], $row['ID']);
 
-            /*
+			/*
              * Check that we have been returned a valid DataObject, using the
              * ClassName and ID stored in the SortableDataObject DB table, to
              * prevent PHP notice:
@@ -126,32 +131,71 @@ class CustomSearch extends Extension {
              *
              * caused when DataObject::get_by_id() returns false
              */
-            if(is_object($do) && $do->exists()) {
-            
-                $do->Title = $row['Title'];
-                $do->Content = $row['Content'];
+			if (is_object($do) && $do->exists()) {
 
-                $list->push($do);
+				$do->Title   = $row['Title'];
+				$do->Content = $row['Content'];
 
-            }
-
+				$list->push($do);
+			}
 		}
 
 		$pageLength = Config::inst()->get('CustomSearch', 'items_per_page');
-		$ret = new PaginatedList($list, $request);
+		$ret        = new PaginatedList($list, $request);
 		$ret->setPageLength($pageLength);
+
+		$input = strtolower($input);
+		$result = DataObject::get('SearchRequests')->where(sprintf('Phrase = \'%s\'', $input))->limit(1);
+		if($result->first()) {
+			$request = $result->first();
+			$request->Count = $request->Count + 1;
+		} else {
+			$request = new SearchRequests();
+			$request->Phrase = $input;
+			$request->Results = count($list);
+		}
+		$request->write();
 
 		return $ret;
 	}
 
-	public function results($data, $form, $request) {
+
+	/**
+	 * @return string
+	 */
+	public function SearchPhrase()
+	{
+		$input = filter_input(INPUT_GET, 'Search', FILTER_SANITIZE_STRING);
+
+		return $input;
+	}
+
+	/**
+	 * @return ArrayList
+	 */
+	public function LastRequests()
+	{
+		$list = new ArrayList();
+		$data = DataObject::get('SearchRequests')->where('Phrase != \'\' AND Results > 0')->limit(10);
+
+		foreach ($data as $row) {
+			$list->push(new ArrayData(array(
+					'Phrase' => $row->getField('Phrase'),
+					'Results' => $row->getField('Results')
+			)));
+		}
+
+		return $list;
+	}
+
+	public function results($data, $form, $request)
+	{
 
 		$data = array(
 				'Results' => $this->getSearchResults($request),
 				'Query' => $form->getSearchQuery(),
-                'Title' => _t('CustomSearch.SEARCHRESULTS', 'Risultati della ricerca')
+				'Title' => _t('CustomSearch.SEARCHRESULTS', 'Risultati della ricerca')
 		);
 		return $this->owner->customise($data)->renderWith(array('Page_results', 'Page'));
 	}
-
 }
